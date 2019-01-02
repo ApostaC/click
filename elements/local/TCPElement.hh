@@ -26,7 +26,7 @@ public:
 
     ~TCPElement();
 
-    const char *class_name() const { return "tcpEntity"; }
+    const char *class_name() const { return "TCPElement"; }
 
     const char *port_count() const { return "2-/2-"; }
 
@@ -53,13 +53,13 @@ public:
     void cancel_client_timer();
 
 private:
+    Timer client_submit_timer;
     Timer timer_resend;
     Timer timer_debug;
     Timer timer_fin;
     Packet *info_resend;
     Packet *info_fin;
     Packet* slot[CLIENT_BUFFER_SIZE];
-    Timer client_submit_timer;
     uint32_t myip;
     uint16_t myport;
     uint32_t coip;
@@ -82,16 +82,16 @@ private:
         format->src = myip;
         format->src_port = myport;
         format->dest = coip;
-	format->slot = CLIENT_BUFFER_SIZE;
+        format->slot = CLIENT_BUFFER_SIZE;
         format->dest_port = coport;
         format->ack = nxt_ack;
         format->seq = nxt_seq;
         format->count = 0;
-	format->acked_max = acked_max;
+        format->acked_max = acked_max;
     }
     queue<Packet *> server_buffer;
     queue<Packet *> buffer;
-    
+
     uint8_t tcpele_type;            //server or client
 };
 

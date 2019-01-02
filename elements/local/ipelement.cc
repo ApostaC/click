@@ -1,6 +1,7 @@
 #include<click/config.h>
 #include<click/confparse.hh>
 #include<click/error.hh>
+#include <sstream>
 #include "ipelement.hh"
 #include "packets.hh"
 #include <queue>
@@ -9,12 +10,17 @@ using std::queue;
 using std::vector;
 #define min(a,b) (a<b?a:b)
 #define mem(a,b) memset(a,b,sizeof(a))
-#define PORTCNT (this->nports(false))
+#define PORTCNT (this->nports(false))   // ISOUTPUT = FALSE --> means the input port number
+#define INCNT (this->nports(false))
+#define OUTCNT (this->nports(true))
 #define rep(i,j,k) for(int i=j;i<=k;i++)
 CLICK_DECLS
 IPElement::IPElement():timer_hello(this),timer_exchange(this),timer_timepass(this){}
 IPElement::~IPElement(){}
 int IPElement::configure(Vector<String> &conf, ErrorHandler *errh) {
+    timer_hello.initialize(this);
+    timer_exchange.initialize(this);
+    timer_timepass.initialize(this);
     if (cp_va_kparse(conf, this, errh,
                 "MY_ADDRESS", cpkP+cpkM, cpIPAddress, &addr,
                 "PERIOD_HELLO", cpkP, cpUnsigned, &dt_hello,
@@ -33,16 +39,13 @@ int IPElement::initialize(ErrorHandler* errh){
     mem(iplist,0xFF);
     dist[0][0] = 0;
     iplist[0] = addr;
-    timer_hello.initialize(this);
-    timer_exchange.initialize(this);
-    timer_timepass.initialize(this);
     timer_hello.schedule_now();
     timer_exchange.schedule_after_sec(dt_exchange);
     timer_timepass.schedule_after_sec(dt_timepass);
     return 0;
 }
 void IPElement::erase_port(int port){
-    click_chatter("200: MY IP %x, ERASE PORT: %d",addr, port);
+    //click_chatter("200: MY IP %x, ERASE PORT: %d",addr, port);
     uint32_t ip = port2ip[port];
     ip2port.erase(ip);
     port2ip.erase(port);
@@ -80,7 +83,7 @@ void IPElement::erase_port(int port){
 }
 
 void IPElement::run_timer(Timer* timer){
-    click_chatter("001: Enter run_timer of %x ", addr);
+    //click_chatter("001: Enter run_timer of %x, myIp is %s ", addr, Int2Ipaddr(this->addr).c_str());
     struct MyIPHeader* format;
     if(timer == &timer_hello){
         rep(i,1,PORTCNT - 1){
@@ -95,7 +98,8 @@ void IPElement::run_timer(Timer* timer){
             format -> size = sizeof(struct MyIPHeader);
             output(i).push(hello);
         }
-        //click_chatter("002: My IP is %x, I just broadcast Hello message to %d ports", this->addr, PORTCNT - 1);
+        //click_chatter("002: My IP is %s, I just broadcast Hello message to %d ports",
+        //       Int2Ipaddr(this->addr).c_str(), OUTCNT);
         timer->reschedule_after_sec(dt_hello);
     } else if (timer == &timer_exchange) {
         int cnt = 0;
@@ -132,7 +136,7 @@ void IPElement::run_timer(Timer* timer){
             }
         timer->reschedule_after_sec(dt_exchange);
     } else if (timer == &timer_timepass) {
-        rep(i,1,PORTCNT-1){
+        rep(i,1,OUTCNT -1){
             if (port2ip[i]) port_age[i] += 5;
             //click_chatter("IP: %x, PORT: %d, PORT_AGE: %d",addr,i,port_age[i]);
             if (port_age[i] >= 20) {
@@ -148,7 +152,7 @@ void IPElement::run_timer(Timer* timer){
 void IPElement::push(int port,Packet* packet){
     // we get packet from tcp
 
-    //click_chatter("Pushing packet!");
+    click_chatter("Pushing packet!");
     if (port == 0) {
         struct MyTCPHeader* tcp_header = (struct MyTCPHeader*)(packet->data());
         if(!ipnxthop[tcp_header->dest]){
@@ -167,6 +171,7 @@ void IPElement::push(int port,Packet* packet){
         memcpy(data, tcp_header, tcp_header->size);
         int out_port = ipnxthop[tcp_header->dest];
         output(out_port).push(ip_encap);
+        click_chatter("Pushing TCP packet into port %d\n", out_port);
     } else {
         struct MyIPHeader* ip_header = (struct MyIPHeader*)(packet->data());
         if (ip_header -> type == HELLO) {
@@ -179,6 +184,7 @@ void IPElement::push(int port,Packet* packet){
             format -> size = sizeof(struct MyIPHeader);
             packet -> kill();
             output(port).push(response);
+            click_chatter("Pushing HELLO response packet into port %d\n", port);
             //click_chatter("101:MYIP IS :%x  AND I RECIEVE HELLO FROM IP %x PORT %d, AND SEND BACK A RESP", addr, (int)(ip_header->src), port);
             return;
         }
@@ -201,7 +207,7 @@ void IPElement::push(int port,Packet* packet){
                 }
                 //click_chatter("301: RENEW PAIR: MYIP %x,DEST %x",addr,ip_header->src);
             }
-            click_chatter("102:MYIP IS :%x  AND I RECIEVE RESP FROM IP %x PORT %d, RENEW MY DEST TABLE", addr, (int)(ip_header->src),port);
+            //click_chatter("102:MYIP IS :%x  AND I RECIEVE RESP FROM IP %x PORT %d, RENEW MY DEST TABLE", addr, (int)(ip_header->src),port);
             //dijkstra(addr);
             packet->kill();
             return;
@@ -245,18 +251,18 @@ void IPElement::push(int port,Packet* packet){
         }
 
         if (ip_header -> type == EXCHANGE){
-            click_chatter("103:MYIP IS :%x  AND I RECIEVE EXCHANGE FROM IP %x PORT %d", addr, (int)(ip_header->src), port);
+            //click_chatter("103:MYIP IS :%x  AND I RECIEVE EXCHANGE FROM IP %x PORT %d", addr, (int)(ip_header->src), port);
             port_used[port] = true;
             port_age[port] = 0;
             char* data_c = (char*)(packet->data() + sizeof(struct MyIPHeader));
             int length = ip_header -> size - sizeof(struct MyIPHeader);
             length /= 12;
-            click_chatter("EXCHANGE PACKET RECV: LENGTH %d",length);
+            //click_chatter("EXCHANGE PACKET RECV: LENGTH %d",length);
             uint32_t* data = (uint32_t*) data_c;
             rep(i, 0, length - 1){
                 uint32_t src_ip = data[3*i], dest_ip = data[3*i+1];
                 int d = data[3*i+2];
-                click_chatter("EXCHANGE PACKET RECV: SRC %x, DEST: %x, DIST: %d", src_ip, dest_ip, d);
+                //click_chatter("EXCHANGE PACKET RECV: SRC %x, DEST: %x, DIST: %d", src_ip, dest_ip, d);
                 if(src_ip == addr || dest_ip == addr) continue;
                 int src_id = ip_in_list(src_ip);
                 if (src_id == -1) { 
@@ -280,7 +286,8 @@ void IPElement::push(int port,Packet* packet){
                 rep(i,1,PORTCNT-1)
                     if(i != port && port_used[i]){
                         output(i).push(packet);
-                        click_chatter("103:MYIP IS :%x  AND I RECIEVE EXCHANGE FROM IP %x PORT %d, FORWARD IT TO PORT %d", addr, (int)(ip_header->src), port, i);
+                        click_chatter("Pushing EXCHANGE forward packet into port %d\n", i);
+                        //click_chatter("103:MYIP IS :%x  AND I RECIEVE EXCHANGE FROM IP %x PORT %d, FORWARD IT TO PORT %d", addr, (int)(ip_header->src), port, i);
                     }
             }
             packet->kill();
@@ -293,6 +300,7 @@ void IPElement::push(int port,Packet* packet){
             if (ip_header -> dest == this -> addr){
                 WritablePacket* tcppacket = Packet::make(packet->data()+sizeof(MyIPHeader), ip_header->size - sizeof(MyIPHeader));
                 output(0).push(tcppacket);
+                click_chatter("Pushing TCPAPP packet into port 0\n");
                 return;
             } else {
                 if (ip_header -> TTL == 1) {
@@ -302,7 +310,8 @@ void IPElement::push(int port,Packet* packet){
                 ip_header->TTL-=1;
                 if (ipnxthop[ip_header->dest]){
                     output(ipnxthop[ip_header->dest]).push(packet);
-                    click_chatter("104:MYIP IS :%x  AND I RECIEVE DATA FROM IP %x PORT %d, FORWARD IT TO PORT %d", addr, (int)(ip_header->src ),port, ipnxthop[ip_header->dest]);
+                    click_chatter("Pushing TCPAPP packet into port 0\n", ipnxthop[ip_header->dest]);
+                    //click_chatter("104:MYIP IS :%x  AND I RECIEVE DATA FROM IP %x PORT %d, FORWARD IT TO PORT %d", addr, (int)(ip_header->src ),port, ipnxthop[ip_header->dest]);
                 }
                 else
                     cout << "failed to forward packet because destination is unreachable" << endl;
@@ -310,7 +319,7 @@ void IPElement::push(int port,Packet* packet){
             packet->kill();
             return;
         }
-        click_chatter("UNKNOWN PACKET: TYPE %d, SRC %x, DEST %x,TTL %x,Size %d",ip_header->type,ip_header->src,ip_header->dest,ip_header->TTL,ip_header->size);	
+        //click_chatter("UNKNOWN PACKET: TYPE %d, SRC %x, DEST %x,TTL %x,Size %d",ip_header->type,ip_header->src,ip_header->dest,ip_header->TTL,ip_header->size);	
         return;
     }
 }
@@ -344,11 +353,27 @@ void IPElement::dijkstra(uint32_t addr){
             } 
         }
     }
-    click_chatter("400: AFTER DIJK: WE(IP: %x) ARE CONNECTED TO THE FOLLOWING IP", addr);
+    //click_chatter("400: AFTER DIJK: WE(IP: %x) ARE CONNECTED TO THE FOLLOWING IP", addr);
     for(int i=1;i<=MAXN;i++){
         if(iplist[i]!=-1);
-        click_chatter("IP: %x;  NEXTHOP: %d",iplist[i],ipnxthop[iplist[i]]);
+        //click_chatter("IP: %x;  NEXTHOP: %d",iplist[i],ipnxthop[iplist[i]]);
     }
+}
+
+std::string IPElement::Int2Ipaddr(uint32_t addr)
+{
+    struct Iaddr
+    {
+        int a0 : 8;
+        int a1 : 8;
+        int a2 : 8;
+        int a3 : 8;
+    }__attribute__((packed));
+    Iaddr a = *(Iaddr *)(&addr);
+    char buf[30];
+    sprintf(buf, "%d.%d.%d.%d\0", a.a0, a.a1, a.a2, a.a3);
+    std::string ret{buf};
+    return ret;
 }
 
 

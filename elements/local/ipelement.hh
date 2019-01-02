@@ -5,6 +5,7 @@
 #include <click/hashtable.hh>
 #include "packets.hh"
 #include <cstring>
+#include <string>
 #include <iostream>
 using std::cout;
 using std::endl;
@@ -25,6 +26,9 @@ class IPElement : public Element {
 		void run_timer(Timer* timer);
 		void dijkstra(uint32_t addr);
 		void erase_port(int);
+
+    public:
+        static std::string Int2Ipaddr(uint32_t addr);
 	private:
 		HashTable<unsigned,int> ip2port;
 		HashTable<int,unsigned> port2ip;
@@ -63,6 +67,7 @@ class IPElement : public Element {
 		}
 
 };
+
 CLICK_ENDDECLS
 #endif
 

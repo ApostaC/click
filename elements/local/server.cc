@@ -4,6 +4,7 @@
 #include "server.hh"
 #include <fstream>
 #include <string>
+#include <click/standard/scheduleinfo.hh>
 #include <iostream>
 #include "packets.hh"
 using std::string;
@@ -27,8 +28,15 @@ int Server::configure(Vector<String> &conf, ErrorHandler *errh)
 
 int Server::initialize(ErrorHandler* errh)
 {
+    ScheduleInfo::initialize_task(this, &_task, errh);
+    return 0;
+}
+
+bool Server::run_task(Task *_task)
+{
     const char* data = str.data();
     int len = str.length();
+    if(_done) goto RES;
     if (type == MESSAGE) {
         WritablePacket* outpacket = Packet::make(sizeof(struct MyAPPHeader)+len);
         ((struct MyAPPHeader*)outpacket->data())->dst_ip = dst_ip;
@@ -59,7 +67,9 @@ int Server::initialize(ErrorHandler* errh)
             output(0).push(outpacket);
         }
     }
-    return 0;
+RES:
+    _done = true;
+    _task->fast_reschedule();
 }
 
 CLICK_ENDDECLS

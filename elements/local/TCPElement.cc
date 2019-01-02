@@ -20,23 +20,6 @@ int cntt = 0;
 CLICK_DECLS
 
 TCPElement::TCPElement() :timer_resend(this), timer_debug(this),timer_fin(this),client_submit_timer(this) {
-}
-
-TCPElement::~TCPElement() {}
-
-int TCPElement::configure(Vector <String> &conf, ErrorHandler *errh) {
-    if (cp_va_kparse(conf, this, errh, "MY_PORT", cpkP + cpkM, cpTCPPort,
-                     &myport, "MY_IP", cpkP + cpkM, cpIPAddress, &myip, "TYPE",
-                     cpkP + cpkM, cpUnsigned, &tcpele_type, "TIME_OUT",
-                     cpkP + cpkM, cpUnsigned, &timeout, cpEnd) < 0)
-        return -1;
-    return 0;
-}
-
-int TCPElement::initialize(ErrorHandler *) {
-    timer_resend.initialize(this);
-    timer_fin.initialize(this);
-    client_submit_timer.initialize(this);
     nxt_ack = nxt_seq = 0;
     coport = coip = 0;
     cur_data = base_data = 0;
@@ -48,6 +31,24 @@ int TCPElement::initialize(ErrorHandler *) {
     state = CLOSED;
     memset(slot,0,sizeof(slot));
     std::srand(std::time(0));
+}
+
+TCPElement::~TCPElement() {}
+
+int TCPElement::configure(Vector <String> &conf, ErrorHandler *errh) {
+    timer_fin.initialize(this);
+    client_submit_timer.initialize(this);
+    timer_debug.initialize(this);
+    timer_resend.initialize(this);
+    if (cp_va_kparse(conf, this, errh, "MY_PORT", cpkP + cpkM, cpTCPPort,
+                     &myport, "MY_IP", cpkP + cpkM, cpIPAddress, &myip, "TYPE",
+                     cpkP + cpkM, cpUnsigned, &tcpele_type, "TIME_OUT",
+                     cpkP + cpkM, cpUnsigned, &timeout, cpEnd) < 0)
+        return -1;
+    return 0;
+}
+
+int TCPElement::initialize(ErrorHandler *) {
     return 0;
 }
 
@@ -97,7 +98,7 @@ void TCPElement::push(int port, Packet *packet) {
 
         //need to buffer...
         WritablePacket* tmp = Packet::make(NULL,packet->length());
-	memcpy(tmp->data(),packet->data(),packet->length());
+        memcpy(tmp->data(),packet->data(),packet->length());
         buffer.push(tmp);
         click_chatter("TCP Element received packet from APP");
         click_chatter("There are %d packets in the queue now", buffer.size());
@@ -116,7 +117,7 @@ void TCPElement::push(int port, Packet *packet) {
             nxt_seq = 0;
             makeTCPhead(format, SYN);
             click_chatter("TCP: connection establishing..\n MY IP %x, MY PORT: %d, CO IP: %x, CO PORT: %d", myip,
-                          myport, coip, coport);
+                    myport, coip, coport);
             click_chatter("sent pack with seq: %d ,ack %d", nxt_seq, nxt_ack);
             state = SYN_SENT;
             nxt_ack ++;
@@ -128,19 +129,23 @@ void TCPElement::push(int port, Packet *packet) {
     } else if (port == 0) {
         // our model: server get data from app level and start a request, send
         // data to the client
-		
+
         uint8_t type = ((MyTCPHeader*)packet->data())->type;
-		uint32_t seq = ((MyTCPHeader*)packet->data())->seq;
-		uint32_t ack = ((MyTCPHeader*)packet->data())->ack;
-		uint16_t sport = ((MyTCPHeader*)packet->data())->src_port;
-		uint16_t dport = ((MyTCPHeader*)packet->data())->dest_port;
-		uint32_t sip = ((MyTCPHeader*)packet->data())->src;
+        uint32_t seq = ((MyTCPHeader*)packet->data())->seq;
+        uint32_t ack = ((MyTCPHeader*)packet->data())->ack;
+        uint16_t sport = ((MyTCPHeader*)packet->data())->src_port;
+        uint16_t dport = ((MyTCPHeader*)packet->data())->dest_port;
+        uint32_t sip = ((MyTCPHeader*)packet->data())->src;
         if (tcpele_type == 0) {  // which means you are a client
-	if (rand()%100==3){
-		click_chatter("I am %d,I lost packet with seq %d,ack %d",tcpele_type,seq,ack);
-		packet->kill();
-		return;
-	}
+            /* Simulate the lossy link, this should be done in IP layer */
+            /*
+            if (rand()%100==3){
+                click_chatter("I am %d,I lost packet with seq %d,ack %d",tcpele_type,seq,ack);
+                packet->kill();
+                return;
+            }
+            */
+            /* TCP STATE MACHINE */
             if (state == CLOSED) {
                 // server start request, client receive it, send SYN+ACK to the
                 // server
@@ -159,7 +164,7 @@ void TCPElement::push(int port, Packet *packet) {
                 makeTCPhead(format, SYN+ACK);
                 format->slot = CLIENT_BUFFER_SIZE;
                 click_chatter("TCP: connection establishing..\n MY IP %x, MY PORT: %d, CO IP: %x, CO PORT: %d", myip,
-                              myport, coip, coport);
+                        myport, coip, coport);
                 click_chatter("sent pack with seq: %d ,ack %d", 0, last->seq + 1);
                 acked_max ++;
 
@@ -199,10 +204,10 @@ void TCPElement::push(int port, Packet *packet) {
                 format->slot = CLIENT_BUFFER_SIZE;
                 acked_max ++;
                 click_chatter("TCP: connection establishing..\n MY IP %x, MY PORT: %d, CO IP: %x, CO PORT: %d", myip,
-                              myport, coip, coport);
+                        myport, coip, coport);
                 click_chatter("sent pack with seq: %d ,ack %d", nxt_seq, nxt_ack);
                 set_timer(tcp_synack,format->size);
-		format->ack = seq + 1;
+                format->ack = seq + 1;
                 nxt_ack = nxt_ack + 1;
                 nxt_seq = nxt_seq + 1;
                 output(0).push(tcp_synack);
@@ -214,31 +219,31 @@ void TCPElement::push(int port, Packet *packet) {
                 struct MyTCPHeader *last = (struct MyTCPHeader *) (packet->data());
                 if (type != FIN && type != DATA){
                     click_chatter("I'm a connected client but I get the wrong packet!");
-		            click_chatter("I get a packet with type %d",type);
+                    click_chatter("I get a packet with type %d",type);
                     packet->kill();
                     return;
                 }
-		click_chatter("receiver received packet, with seq %d, ack %d",seq,ack);
+                click_chatter("receiver received packet, with seq %d, ack %d",seq,ack);
                 if (last->seq != nxt_seq) {
-		    
-		    struct MyTCPHeader* tcp_header = (struct MyTCPHeader *) (packet->data());
+
+                    struct MyTCPHeader* tcp_header = (struct MyTCPHeader *) (packet->data());
                     if (last->seq > nxt_seq && last->seq < nxt_seq + CLIENT_BUFFER_SIZE)
-                    slot[last->seq - nxt_seq] =  Packet::make(packet->data() + sizeof(struct MyTCPHeader),
-                                                            tcp_header->size - sizeof(struct MyTCPHeader));
-		    if (last->seq >= nxt_seq + CLIENT_BUFFER_SIZE){
-			packet->kill();
-			return;
-		    }	
+                        slot[last->seq - nxt_seq] =  Packet::make(packet->data() + sizeof(struct MyTCPHeader),
+                                tcp_header->size - sizeof(struct MyTCPHeader));
+                    if (last->seq >= nxt_seq + CLIENT_BUFFER_SIZE){
+                        packet->kill();
+                        return;
+                    }	
                     WritablePacket *ackpacket = Packet::make(NULL, sizeof(struct MyTCPHeader));
                     struct MyTCPHeader *format = (struct MyTCPHeader *) (ackpacket->data());
                     makeTCPhead(format,ACK);
                     format->seq --; format->ack --;
-		    if(last->seq < nxt_seq) {
-			format->seq = last->seq;
-			format->ack = last->ack+1;
-		    }
+                    if(last->seq < nxt_seq) {
+                        format->seq = last->seq;
+                        format->ack = last->ack+1;
+                    }
                     if(last->seq + 1 >= nxt_ack + CLIENT_BUFFER_SIZE) format->slot = 0;
-		    click_chatter("receive send back ACK, with seq %d, ack %d",format->seq,format->ack);
+                    click_chatter("receive send back ACK, with seq %d, ack %d",format->seq,format->ack);
                     output(0).push(ackpacket);
                     packet->kill();
                     return;
@@ -248,26 +253,26 @@ void TCPElement::push(int port, Packet *packet) {
                 if (type == DATA){
                     struct MyTCPHeader* tcp_header = (struct MyTCPHeader *) (packet->data());
                     slot[0] = Packet::make(packet->data() + sizeof(struct MyTCPHeader),
-                                                            tcp_header->size - sizeof(struct MyTCPHeader));
+                            tcp_header->size - sizeof(struct MyTCPHeader));
                     WritablePacket *ackpacket = Packet::make(NULL, sizeof(struct MyTCPHeader));
                     struct MyTCPHeader *format = (struct MyTCPHeader *) (ackpacket->data());
                     click_chatter("TCP: connection established..\n MY IP %x, MY PORT: %d, CO IP: %x, CO PORT: %d", myip,
-                                myport, coip, coport);
+                            myport, coip, coport);
                     click_chatter("sent pack with seq: %d ,ack %d", nxt_seq, nxt_ack);
                     makeTCPhead(format, ACK);
                     int k = 0;
                     while(slot[k]) k++;
-		    if (k > CLIENT_BUFFER_SIZE)  k = CLIENT_BUFFER_SIZE;
-		    click_chatter("finally we got k to be %d",k);
-		    for(int i=0;i<k;i++) output(1).push(slot[i]);
+                    if (k > CLIENT_BUFFER_SIZE)  k = CLIENT_BUFFER_SIZE;
+                    click_chatter("finally we got k to be %d",k);
+                    for(int i=0;i<k;i++) output(1).push(slot[i]);
                     nxt_ack = format->ack + k;
                     nxt_seq = format->seq + k;
                     for(int i=0;i+k<CLIENT_BUFFER_SIZE;i++){
                         slot[i] = slot[i + k];
                     }
                     for(int j=CLIENT_BUFFER_SIZE-k;j<CLIENT_BUFFER_SIZE;j++) slot[j] =NULL;
-		    format->count = k;
-		    click_chatter("CLIENT DATA:send out ack with seq %d,ack %d,count %d",format->seq,format->ack,format->count);
+                    format->count = k;
+                    click_chatter("CLIENT DATA:send out ack with seq %d,ack %d,count %d",format->seq,format->ack,format->count);
                     set_timer(ackpacket,format->size);
                     output(0).push(ackpacket);
                     packet->kill();
@@ -275,41 +280,41 @@ void TCPElement::push(int port, Packet *packet) {
                 }
                 if (type == FIN){
                     click_chatter("TCP : recieved FIN from server!");
-		click_chatter("TCP: connection establishing..\n MY IP %x, MY PORT: %d, CO IP: %x, CO PORT: %d", myip,
-                          myport, coip, coport);
-            	click_chatter("sent pack with seq: %d ,ack %d", nxt_seq, nxt_ack);
+                    click_chatter("TCP: connection establishing..\n MY IP %x, MY PORT: %d, CO IP: %x, CO PORT: %d", myip,
+                            myport, coip, coport);
+                    click_chatter("sent pack with seq: %d ,ack %d", nxt_seq, nxt_ack);
 
-		    WritablePacket *ack_pack = Packet::make(NULL,sizeof(struct MyTCPHeader));
-		    struct MyTCPHeader* format = (struct MyTCPHeader*)(ack_pack->data());
+                    WritablePacket *ack_pack = Packet::make(NULL,sizeof(struct MyTCPHeader));
+                    struct MyTCPHeader* format = (struct MyTCPHeader*)(ack_pack->data());
                     makeTCPhead(format,FIN+ACK);
-		    set_timer(ack_pack,format->size);
-		    set_fin_timer();
-            cancel_client_timer();
-		    nxt_seq ++;
+                    set_timer(ack_pack,format->size);
+                    set_fin_timer();
+                    cancel_client_timer();
+                    nxt_seq ++;
                     nxt_ack ++;
                     state = FIN_WAIT;
-		    output(0).push(ack_pack);
+                    output(0).push(ack_pack);
                     packet->kill();
-		    click_chatter("chunk of FIN finished");
+                    click_chatter("chunk of FIN finished");
                     return;
                 }
             }
             if (state == FIN_WAIT){
                 if(type != ACK){
-					click_chatter("Client waiting for ACK for FIN, get wrong packet!");
-					packet->kill();
-					return;
-				}
-				else{
-					click_chatter("Client received ACK for FIN, connection down!");
-					cancel_timer();
-					cancel_fin_timer();
-					nxt_ack = nxt_seq = 0;
-					coip = coport = 0;
-					state = CLOSED;
-					packet->kill();
+                    click_chatter("Client waiting for ACK for FIN, get wrong packet!");
+                    packet->kill();
                     return;
-				}
+                }
+                else{
+                    click_chatter("Client received ACK for FIN, connection down!");
+                    cancel_timer();
+                    cancel_fin_timer();
+                    nxt_ack = nxt_seq = 0;
+                    coip = coport = 0;
+                    state = CLOSED;
+                    packet->kill();
+                    return;
+                }
             }
         }
         if (tcpele_type == 1) {  // which means you are a server
@@ -332,7 +337,7 @@ void TCPElement::push(int port, Packet *packet) {
                 WritablePacket *tcp_ack = Packet::make(NULL, sizeof(struct MyTCPHeader));
                 struct MyTCPHeader *format = (struct MyTCPHeader *) (tcp_ack->data());
                 click_chatter("TCP: connection establishing..\n MY IP %x, MY PORT: %d, CO IP: %x, CO PORT: %d", myip,
-                              myport, coip, coport);
+                        myport, coip, coport);
                 click_chatter("sent pack with seq: %d ,ack %d", nxt_seq, nxt_ack);
 
                 makeTCPhead(format, ACK);
@@ -351,22 +356,22 @@ void TCPElement::push(int port, Packet *packet) {
 
                 struct MyTCPHeader *last = (struct MyTCPHeader *) (packet->data());
                 click_chatter("Server received packet from client");
-		click_chatter("now ACKED max is %d, ACK'S ACK is %d",acked_max,last->ack);
+                click_chatter("now ACKED max is %d, ACK'S ACK is %d",acked_max,last->ack);
                 if ((last->type != ACK) ||(last->ack != acked_max + 1)) {
                     click_chatter("Server waiting for ACK, get wrong packet or not appropriate ACK");
-		    click_chatter("Server received packet with seq %d,ack %d",seq,ack);
+                    click_chatter("Server received packet with seq %d,ack %d",seq,ack);
                     if(1) {
-			last_ack ++;
-			click_chatter("current last_ack %d",last_ack);
-			if(last_ack >= 3){
-			    Packet* data = server_buffer.front();
-			    MyTCPHeader* format = (struct MyTCPHeader*)(data->data());
+                        last_ack ++;
+                        click_chatter("current last_ack %d",last_ack);
+                        if(last_ack >= 3){
+                            Packet* data = server_buffer.front();
+                            MyTCPHeader* format = (struct MyTCPHeader*)(data->data());
                             click_chatter("three times, retransmission");
-			    click_chatter("retransmission packet is with seq %d,ack %d",format->seq,format->ack);
-			    click_chatter("already popped out %d packets",cntt);
-			    output(0).push(data);
+                            click_chatter("retransmission packet is with seq %d,ack %d",format->seq,format->ack);
+                            click_chatter("already popped out %d packets",cntt);
+                            output(0).push(data);
                             last_ack = 0;
-			}
+                        }
                     }
                     packet->kill();
                     return;
@@ -383,16 +388,16 @@ void TCPElement::push(int port, Packet *packet) {
                 if(cwnd > 1024) cwnd=1024;
                 click_chatter("after a successful transimission, cwnd is increased to %d",cwnd);
                 if(last->count == 0)
-                acked_max ++;
+                    acked_max ++;
                 else
-                acked_max += last->count;
+                    acked_max += last->count;
                 if(server_buffer.size()) {
                     if(last->count == 0)
-                    server_buffer.pop();
+                        server_buffer.pop();
                     else
-                    for(int i=0;i<last->count;i++)
-                    server_buffer.pop();
-		    cntt += std::max((int)(last->count),1);
+                        for(int i=0;i<last->count;i++)
+                            server_buffer.pop();
+                    cntt += std::max((int)(last->count),1);
                     //in server buffer means already tranmitted
                 }
                 //TODO:
@@ -401,38 +406,38 @@ void TCPElement::push(int port, Packet *packet) {
                 //再buff了app层给到的包
 
                 //stop&wait
-                
+
                 if (!buffer.empty()) {
                     while ((!buffer.empty()) && server_buffer.size() < cwnd){
                         Packet *datapacket = buffer.front();
                         buffer.pop();
                         //retransmission?
                         WritablePacket *tcp_encap = Packet::make(NULL, sizeof(struct MyTCPHeader) +
-                                                                    ((struct MyAPPHeader *) (datapacket->data()))->size);
+                                ((struct MyAPPHeader *) (datapacket->data()))->size);
                         struct MyTCPHeader *format = (struct MyTCPHeader *) (tcp_encap->data());
                         click_chatter("TCP: connection established..\n MY IP %x, MY PORT: %d, CO IP: %x, CO PORT: %d", myip,
-                                    myport, coip, coport);
+                                myport, coip, coport);
                         click_chatter("sent pack with seq: %d ,ack %d", nxt_seq, nxt_ack);
                         makeTCPhead(format, DATA);
                         format->size = sizeof(struct MyTCPHeader) + ((struct MyAPPHeader *) (datapacket->data()))->size;
                         char *data = (char *) (tcp_encap->data() + sizeof(struct MyTCPHeader));
                         memcpy(data, datapacket->data(), ((struct MyAPPHeader *) (datapacket->data()))->size);
-                        
+
                         nxt_seq++;
                         nxt_ack++;
                         WritablePacket *wp = Packet::make(NULL,tcp_encap->length());
-			memcpy(wp->data(),tcp_encap->data(),tcp_encap->length());
+                        memcpy(wp->data(),tcp_encap->data(),tcp_encap->length());
                         server_buffer.push(wp);
                         output(0).push(tcp_encap);
                     }
-		    Packet* pack = server_buffer.front();
+                    Packet* pack = server_buffer.front();
                     set_timer(pack,pack->length());
                     return;
 
                 } else {
-				click_chatter("TCP: connection establishing..\n MY IP %x, MY PORT: %d, CO IP: %x, CO PORT: %d", myip,
-                          		myport, coip, coport);
-	 	           	click_chatter("sent pack with seq: %d ,ack %d", nxt_seq, nxt_ack);
+                    click_chatter("TCP: connection establishing..\n MY IP %x, MY PORT: %d, CO IP: %x, CO PORT: %d", myip,
+                            myport, coip, coport);
+                    click_chatter("sent pack with seq: %d ,ack %d", nxt_seq, nxt_ack);
 
                     if(nxt_seq == acked_max){
                         WritablePacket *fin_pack = Packet::make(NULL,sizeof(struct MyTCPHeader));
@@ -442,10 +447,10 @@ void TCPElement::push(int port, Packet *packet) {
                         set_timer(fin_pack, format->size);
                         state = FIN_SENT;
                         output(0).push(fin_pack);
-			            nxt_seq ++;
-			            nxt_ack ++;
+                        nxt_seq ++;
+                        nxt_ack ++;
                     } else {
-			Packet* pack = server_buffer.front();
+                        Packet* pack = server_buffer.front();
                         set_timer(pack,pack->length());
                     }
                     packet->kill();
@@ -453,23 +458,23 @@ void TCPElement::push(int port, Packet *packet) {
                 }
             }
             if (state == FIN_SENT) {
-				click_chatter("Server in state fin_sent");
-				cancel_timer();		
-				if(type != ACK+FIN) 
-				{
-					click_chatter("Server: waiting for FIN+ACK from the client, get the wrong packet!");
-                    			packet->kill();
-					return;
-				}
-				WritablePacket *ack_pack = Packet::make(NULL,sizeof(MyTCPHeader));
-				struct MyTCPHeader* format = (struct MyTCPHeader*)(ack_pack->data());
-                		makeTCPhead(format,ACK);
+                click_chatter("Server in state fin_sent");
+                cancel_timer();		
+                if(type != ACK+FIN) 
+                {
+                    click_chatter("Server: waiting for FIN+ACK from the client, get the wrong packet!");
+                    packet->kill();
+                    return;
+                }
+                WritablePacket *ack_pack = Packet::make(NULL,sizeof(MyTCPHeader));
+                struct MyTCPHeader* format = (struct MyTCPHeader*)(ack_pack->data());
+                makeTCPhead(format,ACK);
                 acked_max ++;
-				output(0).push(ack_pack);
-				packet->kill();
-				state=CLOSED;
-				nxt_seq = nxt_ack = 0;
-				coip = coport = 0;
+                output(0).push(ack_pack);
+                packet->kill();
+                state=CLOSED;
+                nxt_seq = nxt_ack = 0;
+                coip = coport = 0;
                 return;
             }
         }
@@ -484,18 +489,18 @@ void TCPElement::run_timer(Timer *timer) {
     } else if (timer == &timer_resend) {
         // resend packet
         click_chatter("timer resend fired, retransmitting packet, the entity is %d",tcpele_type);
-	MyTCPHeader* format = (struct MyTCPHeader*)(info_resend->data());
-	click_chatter("packet info: seq %d,ack %d",format->seq,format->ack);
+        MyTCPHeader* format = (struct MyTCPHeader*)(info_resend->data());
+        click_chatter("packet info: seq %d,ack %d",format->seq,format->ack);
         lost ++;
         acc_succeed = 0;
         cwnd /= 2;
-	if(cwnd == 0)	cwnd = 1;
+        if(cwnd == 0)	cwnd = 1;
         output(0).push(info_resend);
         if (state == CLOSED)
             timer_resend.unschedule();
         else
             timer_resend.reschedule_after_sec(timeout);
-            // reschedule timer
+        // reschedule timer
     } else if (timer == &timer_fin){
         click_chatter("timer fin fired, stop connection");
         cancel_timer();
@@ -503,8 +508,8 @@ void TCPElement::run_timer(Timer *timer) {
         state = CLOSED;
     }/* else if (timer == &client_submit_timer){
         click_chatter("timer client fired, submiting packets");
-	    for(int i = 0; i < cur_data - base_data; i++){
-            output(1).push(slot[i]);
+        for(int i = 0; i < cur_data - base_data; i++){
+        output(1).push(slot[i]);
         }
         base_data = cur_data;
         WritablePacket* reset = Packet::make(info_resend->data(),info_resend->length());
@@ -513,10 +518,10 @@ void TCPElement::run_timer(Timer *timer) {
         set_timer(reset,format->size);	
         click_chatter("ACK slot now is %d",((struct MyTCPHeader*)info_resend)->slot);
         client_submit_timer.reschedule_after_sec(3);
-    } */
+        } */
 }
 
-CLICK_ENDDECLS
+    CLICK_ENDDECLS
 EXPORT_ELEMENT(TCPElement)
 
 
